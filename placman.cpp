@@ -34,6 +34,7 @@ const int RIGHT = 2;
 
 const int RED_HUE = 170;
 const int GREEN_HUE = 300;
+const int BLUE_HUE = 60;
 
 // The direction the user is trying to move the snake. Updated when the user is holding a button during a tick.
 int direction = STRAIGHT;
@@ -440,10 +441,11 @@ void assignColors() {
 
   for (Line* l : snake.body.queue) {
     if (l != NULL) {
-      l->setHue(GREEN_HUE);
+      l->setHue(BLUE_HUE);
     }
   }
 
+  snake.head()->setHue(GREEN_HUE);
 }
 
 // Get the direction the user is trying to move the snake

@@ -23,9 +23,27 @@ SDL_Renderer *renderer;
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 
+// Indexes into the neighbor arrays for the left, straight and right next lines on the grid
+const int LEFT = 0;
+const int STRAIGHT = 1;
+const int RIGHT = 2;
+
+// The direction the user is trying to move the snake. Updated when the user is holding a button during a tick.
+int direction = STRAIGHT;
+
+void setup();
 void loop();
 void draw();
+void updateStrip();
 void h2rgb(float H, int& R, int& G, int& B);
+
+int max(int a, int b){
+  return a > b ? a : b;
+}
+
+int min(int a, int b) {
+  return a < b ? a : b;
+}
 
 class Line {
   int _id;
@@ -35,6 +53,9 @@ class Line {
   int _endX;
   int _endY;
   public:
+    Line* rightNeighbors[3] = { NULL, NULL, NULL };
+    Line* leftNeighbors[3] = { NULL, NULL, NULL };
+    Line(){}
     Line(int id, int startX, int startY, int endX, int endY) :
       _id(id),
       _startX(startX),
@@ -42,7 +63,7 @@ class Line {
       _endX(endX),
       _endY(endY) {
 
-      _hue = 0;
+      _hue = -1;
     }
     int id() { return _id; }
     int hue() { return _hue; } // 0 - 360
@@ -51,20 +72,110 @@ class Line {
     int startY() { return _startY; }
     int endX() { return _endX; }
     int endY() { return _endY; }
+    int leftX() { return min(_startX, _endX); }
+    int rightX() { return max(_startX, _endX); }
     int R() {
+      if (_hue == -1) return 80;
       int r=0, g=0, b=0;
       h2rgb(_hue / 360.0,r,g,b);
       return r;
     }
     int G() {
+      if (_hue == -1) return 80;
       int r=0, g=0, b=0;
       h2rgb(_hue / 360.0,r,g,b);
       return g;
     }
     int B() {
+      if (_hue == -1) return 80;
       int r=0, g=0, b=0;
       h2rgb(_hue / 360.0,r,g,b);
       return b;
+    }
+};
+
+class Queue {
+  static const int MAXSIZE = 32;  
+  int _length = 0; 
+  public:  
+    Line* queue[MAXSIZE] = {};  
+    int getLength() { return _length; }       
+    bool isempty() {
+      return _length == 0;
+    }
+    bool isfull() {
+      return _length == MAXSIZE;
+    }
+
+    Line* head() {
+      return queue[_length - 1];
+    }
+
+    Line* peekTail() {
+      return queue[0];
+    }
+
+    Line* popTail() {    
+      if(!isempty()) {
+          Line* tail = queue[0];
+
+          // Shift every line back one into the newly freed up space
+          for (int i = 0; i < _length - 1; i++) {
+            queue[i] = queue[i + 1];
+          }
+          _length = _length - 1;
+          return tail;
+      } else {
+        return NULL;
+          // printf("Could not retrieve data, Queue is empty.\n");
+      }
+    }
+
+    void push(Line* data) {
+      if(!isfull()) {   
+          queue[_length] = data;
+          _length = _length + 1;
+      } else {
+          // printf("Could not insert data, Queue is full.\n");
+      }
+    }
+};
+
+// Snake
+class Snake {
+  public:
+    Queue body;
+    int length = 1;
+    Line* head() {
+      return body.head();
+    }
+    // Which direction the snake is facing (i.e. where his head node is compared to his neck)
+    bool facingRight = true;
+
+    void move(int direction) {
+      Line* tail = body.peekTail();
+
+      if (facingRight) {
+        body.push(head()->rightNeighbors[direction]);
+      } else {
+        body.push(head()->leftNeighbors[direction]);
+      }
+
+      // The neck is the segment directly following the head 
+      Line* neck = body.queue[body.getLength() - 2];
+      // if (neck != NULL) {
+      if (facingRight) {
+        // If we were previously facing right, we continue facing right if the left-most nodes don't match
+        facingRight = head()->leftX() != neck->leftX();
+      } else {
+        // If we were previously facing left, we only switch to right if the left-most nodes match (we turned 90 degrees)
+        facingRight = head()->leftX() == neck->leftX();
+      }
+      
+      // Remove the last segment of the tail
+      if (body.getLength() > length) {
+         body.popTail();
+      }
     }
 };
 
@@ -106,6 +217,55 @@ Line lines[32] = {
   Line(31, 6,4,5,5),
 };
 
+void initLine(int index, 
+  int leftNeighborLeft, int leftNeighborStraight, int leftNeighborRight,
+  int rightNeighborLeft, int rightNeighborStraight, int rightNeighborRight) {
+
+  lines[index].leftNeighbors[LEFT] = &lines[leftNeighborLeft];
+  lines[index].leftNeighbors[STRAIGHT] = &lines[leftNeighborStraight];
+  lines[index].leftNeighbors[RIGHT] = &lines[leftNeighborRight];
+  lines[index].rightNeighbors[LEFT] = &lines[rightNeighborLeft];
+  lines[index].rightNeighbors[STRAIGHT] = &lines[rightNeighborStraight];
+  lines[index].rightNeighbors[RIGHT] = &lines[rightNeighborRight];
+}
+
+void initLines() {
+  initLine(0, 10,9,9, 23,1,22);
+  initLine(1, 23,0,22, 17,2,18);
+  initLine(2, 17,1,18, 28,3,29);
+  initLine(3, 28,2,29, 15,15,4);
+  initLine(4, 3,15,15, 5,5,5);
+  initLine(5, 29,6,30, 4,4,4);
+  initLine(6, 18,7,19, 29,5,30);
+  initLine(7, 22,8,21, 18,6,19);
+  initLine(8, 9,9,9, 22,7,21);
+  initLine(9, 10,10,0, 8,8,8);
+  initLine(10, 11,11,11, 9,9,0);
+  initLine(11, 10,10,10, 24,12,23);
+  initLine(12, 24,11,23, 16,13,17);
+  initLine(13, 16,12,17, 27,14,28);
+  initLine(14, 27,13,28, 15,15,15);
+  initLine(15, 14,14,14, 3,4,4);
+  initLine(16, 25,25,26, 12,17,13);
+  initLine(17, 12,16,13, 1,18,2);
+  initLine(18, 1,17,2, 7,19,6);
+  initLine(19, 7,18,6, 20,31,31);
+  initLine(20, 21,21,21, 19,31,31);
+  initLine(21, 8,22,7, 20,20,20);
+  initLine(22, 0,23,1, 8,21,7);
+  initLine(23, 11,24,12, 0,22,1);
+  initLine(24, 25,25,25, 11,23,12);
+  initLine(25, 24,24,24, 26,26,16);
+  initLine(26, 25,25,16, 27,27,27);
+  initLine(27, 26,26,26, 13,28,14);
+  initLine(28, 13,27,14, 2,29,3);
+  initLine(29, 2,28,3, 6,30,5);
+  initLine(30, 6,29,5, 31,31,31);
+  initLine(31, 19,20,20, 30,30,30);
+}
+
+Snake snake;
+
 int lineCount() {
   return sizeof(lines) / sizeof(Line);
 }
@@ -116,6 +276,7 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
   _window = SDL_CreateWindow("PLAC-MAN", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 700, 500, SDL_WINDOW_RESIZABLE);
   renderer = SDL_CreateRenderer(_window, -1, SDL_RENDERER_ACCELERATED);
   SDL_Event e;
+  setup();
   bool quit = false;
   while (!quit){
     while (SDL_PollEvent(&e)){
@@ -123,7 +284,13 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
         quit = true;
       }
       if (e.type == SDL_KEYDOWN){
-        quit = true;
+        if (e.key.keysym.sym == SDLK_LEFT) {
+          direction = LEFT;
+          std::cout << "LEFT" << std::endl;
+        } else if (e.key.keysym.sym == SDLK_RIGHT) {
+          direction = RIGHT;
+          std::cout << "RIGHT" << std::endl;
+        }
       }
     }
 
@@ -131,7 +298,7 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
   }
 
   if (renderer) {
-      SDL_DestroyRenderer(renderer);
+    SDL_DestroyRenderer(renderer);
   }
   SDL_DestroyWindow(_window);
   SDL_Quit();
@@ -140,23 +307,61 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
 }
 #endif
 
-void setup() { // Only called for MICRO_MODE
+void assignColors() {
+  // Assign each light a default hue
+  for (int i = 0; i < lineCount(); i++) {
+    lines[i].setHue(-1);//i * (360 / lineCount()));
+  }
+
+  for (Line* l : snake.body.queue) {
+    if (l != NULL) {
+      l->setHue(200);
+    }
+  }
+}
+
+// Get the direction the user is trying to move the snake
+int getDirection() {
+  return direction;
+}
+
+void tick() {
+  snake.move(getDirection());
+  direction = STRAIGHT;
+}
+
+void setup() { // Called for both modes
+  initLines();
+  snake.body.push(&lines[0]);
+
 #ifdef MICRO_MODE
   Serial.begin(9600);           // set up Serial library at 9600 bps
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
   strip.show();            // Turn OFF all pixels ASAP
   strip.setBrightness(255); // Set BRIGHTNESS to about 1/5 (max = 255)
 #endif
+}
 
-  for (int i = 0; i < lineCount(); i++) {
-    lines[i].setHue(i * (360 / lineCount()));
-  }
+void delay_ms(int ms) {
+#ifdef LAPTOP_MODE
+  SDL_Delay(ms);
+#endif
+#ifdef MICRO_MODE
+  delay(ms);
+#endif
 }
 
 void loop() {
+  assignColors();
+
   draw();
+  updateStrip();
+
+
+  delay_ms(500);
+
+  tick();
     
-#ifdef MICRO_MODE  
   // Fill along the length of the strip in various colors...
   // colorWipe(strip.Color(255,   0,   0), 50); // Red
   // colorWipe(strip.Color(  0, 255,   0), 50); // Green
@@ -169,8 +374,6 @@ void loop() {
 
   // rainbow(10);             // Flowing rainbow cycle along the whole strip
   // theaterChaseRainbow(50); // Rainbow-enhanced theaterChase variant
-  updateStrip();
-#endif
 }
 
 void draw(){
@@ -194,96 +397,16 @@ void draw(){
 
 
 
-#ifdef MICRO_MODE
-
 void updateStrip() {
+#ifdef MICRO_MODE
   for (int i = 0 ; i < lineCount(); i++) {
     if (i < strip.numPixels()) {
       strip.setPixelColor(i, strip.Color(lines[i].R(), lines[i].G(), lines[i].B()));
     }
   }
   strip.show();
-}
-
-// From Adafruit NeoPixel library example 'strandtest'
-// Some functions of our own for creating animated effects -----------------
-
-// Fill strip pixels one after another with a color. Strip is NOT cleared
-// first; anything there will be covered pixel by pixel. Pass in color
-// (as a single 'packed' 32-bit value, which you can get by calling
-// strip.Color(red, green, blue) as shown in the loop() function above),
-// and a delay time (in milliseconds) between pixels.
-void colorWipe(uint32_t color, int wait) {
-  for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
-    strip.setPixelColor(i, color);         //  Set pixel's color (in RAM)
-    strip.show();                          //  Update strip to match
-    delay(wait);                           //  Pause for a moment
-  }
-}
-
-// Theater-marquee-style chasing lights. Pass in a color (32-bit value,
-// a la strip.Color(r,g,b) as mentioned above), and a delay time (in ms)
-// between frames.
-void theaterChase(uint32_t color, int wait) {
-  for(int a=0; a<10; a++) {  // Repeat 10 times...
-    for(int b=0; b<3; b++) { //  'b' counts from 0 to 2...
-      strip.clear();         //   Set all pixels in RAM to 0 (off)
-      // 'c' counts up from 'b' to end of strip in steps of 3...
-      for(int c=b; c<strip.numPixels(); c += 3) {
-        strip.setPixelColor(c, color); // Set pixel 'c' to value 'color'
-      }
-      strip.show(); // Update strip with new contents
-      delay(wait);  // Pause for a moment
-    }
-  }
-}
-
-// Rainbow cycle along whole strip. Pass delay time (in ms) between frames.
-void rainbow(int wait) {
-  // Hue of first pixel runs 5 complete loops through the color wheel.
-  // Color wheel has a range of 65536 but it's OK if we roll over, so
-  // just count from 0 to 5*65536. Adding 256 to firstPixelHue each time
-  // means we'll make 5*65536/256 = 1280 passes through this outer loop:
-  for(long firstPixelHue = 0; firstPixelHue < 5*65536; firstPixelHue += 256) {
-    for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
-      // Offset pixel hue by an amount to make one full revolution of the
-      // color wheel (range of 65536) along the length of the strip
-      // (strip.numPixels() steps):
-      int pixelHue = firstPixelHue + (i * 65536L / strip.numPixels());
-      // strip.ColorHSV() can take 1 or 3 arguments: a hue (0 to 65535) or
-      // optionally add saturation and value (brightness) (each 0 to 255).
-      // Here we're using just the single-argument hue variant. The result
-      // is passed through strip.gamma32() to provide 'truer' colors
-      // before assigning to each pixel:
-      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
-    }
-    strip.show(); // Update strip with new contents
-    delay(wait);  // Pause for a moment
-  }
-}
-
-// Rainbow-enhanced theater marquee. Pass delay time (in ms) between frames.
-void theaterChaseRainbow(int wait) {
-  int firstPixelHue = 0;     // First pixel starts at red (hue 0)
-  for(int a=0; a<30; a++) {  // Repeat 30 times...
-    for(int b=0; b<3; b++) { //  'b' counts from 0 to 2...
-      strip.clear();         //   Set all pixels in RAM to 0 (off)
-      // 'c' counts up from 'b' to end of strip in increments of 3...
-      for(int c=b; c<strip.numPixels(); c += 3) {
-        // hue of pixel 'c' is offset by an amount to make one full
-        // revolution of the color wheel (range 65536) along the length
-        // of the strip (strip.numPixels() steps):
-        int      hue   = firstPixelHue + c * 65536L / strip.numPixels();
-        uint32_t color = strip.gamma32(strip.ColorHSV(hue)); // hue -> RGB
-        strip.setPixelColor(c, color); // Set pixel 'c' to value 'color'
-      }
-      strip.show();                // Update strip with new contents
-      delay(wait);                 // Pause for a moment
-      firstPixelHue += 65536 / 90; // One cycle of color wheel over 90 frames
-    }
-  }
-}
 #endif
+}
 
 
 void h2rgb(float H, int& R, int& G, int& B) {

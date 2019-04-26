@@ -1,6 +1,17 @@
 {
     "files.associations": {
         "iostream": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "iterator": "cpp",
+        "string": "cpp",
+        "string_view": "cpp",
+        "vector": "cpp",
+        "__bit_reference": "cpp",
+        "__string": "cpp",
+        "ios": "cpp",
+        "memory": "cpp",
+        "type_traits": "cpp",
+        "__locale": "cpp",
+        "ostream": "cpp"
     }
 }

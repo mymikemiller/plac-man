@@ -39,6 +39,18 @@ const int BLUE_HUE = 359;
 // The direction the user is trying to move the snake. Updated when the user is holding a button during a tick.
 int direction = STRAIGHT;
 
+// Whether we're showing a rainbow or plaing Snake
+bool rainbow = true;
+
+bool isRainbowMode() {
+#ifdef LAPTOP_MODE
+  return rainbow;
+#endif
+#ifdef MICRO_MODE
+  return digitalRead(6);
+#endif
+}
+
 // If > 0, we are performing a loss animation. Upon reaching 0, we reset.
 int lossAnimation = 0;
 
@@ -346,7 +358,14 @@ int getRandomLineIndex() {
 #ifdef MICRO_MODE
   return random(0, lineCount() - 1);
 #endif
-  return rand()%(lineCount()-0 + 1) + 0;
+  return rand()%(lineCount()) + 0;
+}
+
+int getRandomHue() {
+#ifdef MICRO_MODE
+  return random(0, 359);
+#endif
+  return rand()%(359 + 1) + 0;
 }
 
 void randomizeCherry() {
@@ -354,7 +373,35 @@ void randomizeCherry() {
   while(snake.contains(cherry)) {
     cherry = &lines[getRandomLineIndex()];
   }
-  // std::cout<<"set cherry to " << cherry->id()<<std::endl;
+}
+
+void randomizeColors() {
+  for(int i = 0; i < lineCount(); i++) {
+    lines[i].setHue(getRandomHue());
+  }
+}
+
+// Direction is 1-4 (moving left, up, down or right), offset is 0-359
+void orthagonalRainbowSwipe(int direction, int offset) {
+  int spread = 360;
+  int max = 6; // max x or y of line
+  for(int i = 0; i <= max; i++) {
+
+    int hue = 
+
+    for(int lineI = 0; lineI < lineCount(); lineI++) {
+      Line* line = &lines[linesI];
+      if (direction == 0) { // left
+        if (line->startX() == i) {
+          line->setHue();
+        }
+      } else if (direction == 1) {// up
+        if (line->startY() == i) {
+          
+        }
+      }
+    }
+  }
 }
 
 #ifdef LAPTOP_MODE
@@ -375,38 +422,11 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
           direction = LEFT;
         } else if (e.key.keysym.sym == SDLK_RIGHT) {
           direction = RIGHT;
+        } else if (e.key.keysym.sym == SDLK_SPACE) {
+          rainbow = !rainbow;
         }
       }
     }
-
-
-    // //set up SDL etc.
-    // //set up timing variables etc.
-    // timeStepMs = 1000.f / yourUpdateFrequency; //eg. 30Hz
-    // //set up game world etc.
-
-    // //main loop, run like the wind!
-    // while(!done)
-    // {
-
-    //     timeLastMs = timeCurrentMs;
-    //     timeCurrentMs = SDL_GetTicks();
-    //     timeDeltaMs = timeCurrentMs - timeLastMs;
-    //     timeAccumulatedMs += timeDeltaMs;
-
-    //     while (timeAccumulatedMs >= timeStepMs)
-    //     {
-    //           processInput();
-    //           //update world: do ai, physics, etc. here
-    //           timeAccumulatedMs -= timeStepMs;
-    //     }
-    //     render(); //render update only once
-    // }
-
-    // const Uint8 *state = SDL_GetKeyboardState(NULL);
-    // if (state[SDL_SCANCODE_RETURN]) {
-    //     std::cout<< "<RETURN> is pressed." << std::endl;
-    // }
 
     loop();
   }
@@ -457,6 +477,7 @@ int getDirection() {
 #ifdef MICRO_MODE
   pinMode(4, INPUT_PULLUP);
   pinMode(5, INPUT_PULLUP);
+  pinMode(6, INPUT_PULLUP);
   bool leftButton = digitalRead(4);
   bool rightButton = digitalRead(5);
   if (leftButton) {
@@ -474,19 +495,23 @@ int getDirection() {
 }
 
 void tick() {
-  if (lossAnimation <= 0){
-    snake.move(getDirection());
-    direction = STRAIGHT;
-    if (cherry == snake.head()) {
-      snake.grow();
-      randomizeCherry();
-    }
+  if (isRainbowMode()) {
+    randomizeColors();
   } else {
-    lossAnimation--;
-    if (lossAnimation == 0) {
-      // We're on the last frame of the loss animation
-      snake.reset();
-      randomizeCherry();
+    if (lossAnimation <= 0){
+      snake.move(getDirection());
+      direction = STRAIGHT;
+      if (cherry == snake.head()) {
+        snake.grow();
+        randomizeCherry();
+      }
+    } else {
+      lossAnimation--;
+      if (lossAnimation == 0) {
+        // We're on the last frame of the loss animation
+        snake.reset();
+        randomizeCherry();
+      }
     }
   }
 }
@@ -516,7 +541,9 @@ void delay_ms(int ms) {
 }
 
 void loop() {
-  assignColors();
+  if (!isRainbowMode()) {
+    assignColors();
+  }
 
   draw();
   updateStrip();

@@ -1,0 +1,30 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build with Clang",
+            "type": "shell",
+            "command": "clang++",
+            "args": [
+                "-std=c++17",
+                "-stdlib=libc++",
+                "placman.cpp",
+                "-o",
+                "placman.out",
+                "--debug",
+                "-I",
+                "include",
+                "-L",
+                "lib",
+                "-l",
+                "SDL2-2.0.0",
+                "-l", 
+                "SDL2_gfx"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}

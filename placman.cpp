@@ -4,7 +4,6 @@
 #define MICRO_MODE
 #endif
 
-
 #ifdef LAPTOP_MODE
 #include <iostream>
 #include <SDL2/SDL.h>
@@ -23,13 +22,24 @@ SDL_Renderer *renderer;
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 
+int actual_leds[] = {
+  1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,
+  21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36
+};
+
 // Indexes into the neighbor arrays for the left, straight and right next lines on the grid
 const int LEFT = 0;
 const int STRAIGHT = 1;
 const int RIGHT = 2;
 
+const int RED_HUE = 170;
+const int GREEN_HUE = 300;
+
 // The direction the user is trying to move the snake. Updated when the user is holding a button during a tick.
 int direction = STRAIGHT;
+
+// If > 0, we are performing a loss animation. Upon reaching 0, we reset.
+int lossAnimation = 0;
 
 void setup();
 void loop();
@@ -37,11 +47,11 @@ void draw();
 void updateStrip();
 void h2rgb(float H, int& R, int& G, int& B);
 
-int max(int a, int b){
+int get_max(int a, int b){
   return a > b ? a : b;
 }
 
-int min(int a, int b) {
+int get_min(int a, int b) {
   return a < b ? a : b;
 }
 
@@ -72,22 +82,24 @@ class Line {
     int startY() { return _startY; }
     int endX() { return _endX; }
     int endY() { return _endY; }
-    int leftX() { return min(_startX, _endX); }
-    int rightX() { return max(_startX, _endX); }
+    int leftX() { return get_min(_startX, _endX); }
+    int rightX() { return get_max(_startX, _endX); }
+    int topY() { return get_min(_startY, _endY); }
+    int bottomY() { return get_max(_startY, _endY); }
     int R() {
-      if (_hue == -1) return 80;
+      if (_hue == -1) return 20;
       int r=0, g=0, b=0;
       h2rgb(_hue / 360.0,r,g,b);
       return r;
     }
     int G() {
-      if (_hue == -1) return 80;
+      if (_hue == -1) return 20;
       int r=0, g=0, b=0;
       h2rgb(_hue / 360.0,r,g,b);
       return g;
     }
     int B() {
-      if (_hue == -1) return 80;
+      if (_hue == -1) return 20;
       int r=0, g=0, b=0;
       h2rgb(_hue / 360.0,r,g,b);
       return b;
@@ -106,6 +118,11 @@ class Queue {
     bool isfull() {
       return _length == MAXSIZE;
     }
+    void clear() {
+      while(_length > 0) {
+        popTail();
+      }
+    }
 
     Line* head() {
       return queue[_length - 1];
@@ -120,7 +137,7 @@ class Queue {
           Line* tail = queue[0];
 
           // Shift every line back one into the newly freed up space
-          for (int i = 0; i < _length - 1; i++) {
+          for (int i = 0; i < _length; i++) {
             queue[i] = queue[i + 1];
           }
           _length = _length - 1;
@@ -139,43 +156,14 @@ class Queue {
           // printf("Could not insert data, Queue is full.\n");
       }
     }
-};
 
-// Snake
-class Snake {
-  public:
-    Queue body;
-    int length = 1;
-    Line* head() {
-      return body.head();
-    }
-    // Which direction the snake is facing (i.e. where his head node is compared to his neck)
-    bool facingRight = true;
-
-    void move(int direction) {
-      Line* tail = body.peekTail();
-
-      if (facingRight) {
-        body.push(head()->rightNeighbors[direction]);
-      } else {
-        body.push(head()->leftNeighbors[direction]);
+    bool contains(Line* line) {
+      for (Line* l : queue) {
+        if (line == l) {
+          return true;
+        }
       }
-
-      // The neck is the segment directly following the head 
-      Line* neck = body.queue[body.getLength() - 2];
-      // if (neck != NULL) {
-      if (facingRight) {
-        // If we were previously facing right, we continue facing right if the left-most nodes don't match
-        facingRight = head()->leftX() != neck->leftX();
-      } else {
-        // If we were previously facing left, we only switch to right if the left-most nodes match (we turned 90 degrees)
-        facingRight = head()->leftX() == neck->leftX();
-      }
-      
-      // Remove the last segment of the tail
-      if (body.getLength() > length) {
-         body.popTail();
-      }
+      return false;
     }
 };
 
@@ -215,6 +203,85 @@ Line lines[32] = {
   Line(29, 4,2,5,3),
   Line(30, 5,3,6,4),
   Line(31, 6,4,5,5),
+};
+
+Line* cherry = NULL;
+
+// Snake
+class Snake {
+  public:
+    Queue body;
+    int length = 1;
+    Line* head() {
+      return body.head();
+    }
+    // Which direction the snake is facing (i.e. where his head node is compared to his neck)
+    bool facingRight = true;
+    bool facingUp = true;
+
+    void grow() {
+      length++;
+    }
+    void reset() {
+      body.clear();
+      body.push(&lines[0]);
+      length = 1;
+    }
+
+    bool contains(Line* line) {
+      return body.contains(line);
+    }
+
+    void move(int direction) {
+      // Add a segment in the direction we're facing
+      Line* newHead = NULL;
+      if (facingRight) {
+        if (facingUp){
+          newHead = head()->rightNeighbors[direction];
+        } else {
+          newHead = head()->rightNeighbors[direction == LEFT ? RIGHT : (direction == RIGHT ? LEFT : STRAIGHT)];
+        }
+      } else {
+        if (facingUp){
+          newHead = head()->leftNeighbors[direction];
+        } else {
+          newHead = head()->leftNeighbors[direction == LEFT ? RIGHT : (direction == RIGHT ? LEFT : STRAIGHT)];
+        }
+      }
+
+      // Set the new direction we're facing
+      // The neck is the segment that directly follows the head 
+      Line* neck = body.queue[body.getLength() - 1];
+      if (facingRight) {
+        // If we were previously facing right, we continue facing right if the left-most nodes don't match
+        facingRight = newHead->leftX() != neck->leftX();
+      } else {
+        // If we were previously facing left, we only switch to right if the left-most nodes match (we turned 90 degrees)
+        facingRight = newHead->leftX() == neck->leftX();
+      }
+      if (facingUp) {
+        // If we were previously facing up, we continue facing up if the top-most nodes don't match
+        facingUp = newHead->topY() != neck->topY();
+      } else {
+        // If we were previously facing down, we only switch to up if the top-most nodes match (we turned 90 degrees)
+        facingUp = newHead->topY() == neck->topY();
+      }
+      
+      // Remove the last segment of the tail
+      if (body.getLength() >= length) {
+         body.popTail();
+      }
+
+
+      // Check for the lose condition
+      if (body.contains(newHead)) {
+        // Reset the loss animation. It will play over the next x ticks.
+        lossAnimation = 10;
+      } else {
+        // Add the new head
+        body.push(newHead);
+      }
+    }
 };
 
 void initLine(int index, 
@@ -266,8 +333,27 @@ void initLines() {
 
 Snake snake;
 
+
 int lineCount() {
   return sizeof(lines) / sizeof(Line);
+}
+int actualLedCount() {
+  return sizeof(actual_leds) / sizeof(int);
+}
+
+int getRandomLineIndex() {
+#ifdef MICRO_MODE
+  return random(0, lineCount() - 1);
+#endif
+  return rand()%(lineCount()-0 + 1) + 0;
+}
+
+void randomizeCherry() {
+  cherry = &lines[getRandomLineIndex()];
+  while(snake.contains(cherry)) {
+    cherry = &lines[getRandomLineIndex()];
+  }
+  // std::cout<<"set cherry to " << cherry->id()<<std::endl;
 }
 
 #ifdef LAPTOP_MODE
@@ -286,13 +372,40 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
       if (e.type == SDL_KEYDOWN){
         if (e.key.keysym.sym == SDLK_LEFT) {
           direction = LEFT;
-          std::cout << "LEFT" << std::endl;
         } else if (e.key.keysym.sym == SDLK_RIGHT) {
           direction = RIGHT;
-          std::cout << "RIGHT" << std::endl;
         }
       }
     }
+
+
+    // //set up SDL etc.
+    // //set up timing variables etc.
+    // timeStepMs = 1000.f / yourUpdateFrequency; //eg. 30Hz
+    // //set up game world etc.
+
+    // //main loop, run like the wind!
+    // while(!done)
+    // {
+
+    //     timeLastMs = timeCurrentMs;
+    //     timeCurrentMs = SDL_GetTicks();
+    //     timeDeltaMs = timeCurrentMs - timeLastMs;
+    //     timeAccumulatedMs += timeDeltaMs;
+
+    //     while (timeAccumulatedMs >= timeStepMs)
+    //     {
+    //           processInput();
+    //           //update world: do ai, physics, etc. here
+    //           timeAccumulatedMs -= timeStepMs;
+    //     }
+    //     render(); //render update only once
+    // }
+
+    // const Uint8 *state = SDL_GetKeyboardState(NULL);
+    // if (state[SDL_SCANCODE_RETURN]) {
+    //     std::cout<< "<RETURN> is pressed." << std::endl;
+    // }
 
     loop();
   }
@@ -308,37 +421,82 @@ int main(int argc, const char * argv[]) { // Only called for LAPTOP_MODE
 #endif
 
 void assignColors() {
+  // Handle the loss case and early out first
+  if (lossAnimation > 0) {
+    for(int i = 0; i < lineCount(); i++) {
+      lines[i].setHue(lossAnimation % 2 == 0 ? RED_HUE : -1);
+    }
+    return;
+  }
+
   // Assign each light a default hue
   for (int i = 0; i < lineCount(); i++) {
     lines[i].setHue(-1);//i * (360 / lineCount()));
   }
 
+  if (cherry != NULL) {
+    cherry->setHue(RED_HUE);
+  }
+
   for (Line* l : snake.body.queue) {
     if (l != NULL) {
-      l->setHue(200);
+      l->setHue(GREEN_HUE);
     }
   }
+
 }
 
 // Get the direction the user is trying to move the snake
 int getDirection() {
+#ifdef MICRO_MODE
+  pinMode(4, INPUT_PULLUP);
+  pinMode(5, INPUT_PULLUP);
+  bool leftButton = digitalRead(4);
+  bool rightButton = digitalRead(5);
+  if (leftButton) {
+    Serial.println("LEFT");
+    return LEFT;
+  }
+  if (rightButton) {
+    Serial.println("RIGHT");
+    return RIGHT;
+  }
+  return STRAIGHT;
+#endif
+
   return direction;
 }
 
 void tick() {
-  snake.move(getDirection());
-  direction = STRAIGHT;
+  if (lossAnimation <= 0){
+    snake.move(getDirection());
+    direction = STRAIGHT;
+    if (cherry == snake.head()) {
+      snake.grow();
+      randomizeCherry();
+    }
+  } else {
+    lossAnimation--;
+    if (lossAnimation == 0) {
+      // We're on the last frame of the loss animation
+      snake.reset();
+      randomizeCherry();
+    }
+  }
 }
 
 void setup() { // Called for both modes
   initLines();
-  snake.body.push(&lines[0]);
+  snake.reset();
+  randomizeCherry();
 
 #ifdef MICRO_MODE
   Serial.begin(9600);           // set up Serial library at 9600 bps
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
   strip.show();            // Turn OFF all pixels ASAP
   strip.setBrightness(255); // Set BRIGHTNESS to about 1/5 (max = 255)
+  Serial.println(analogRead(A4));
+  randomSeed(analogRead(A4));
 #endif
 }
 
@@ -357,8 +515,7 @@ void loop() {
   draw();
   updateStrip();
 
-
-  delay_ms(500);
+  delay_ms(lossAnimation > 0 ? 200 : 500);
 
   tick();
     
@@ -399,9 +556,9 @@ void draw(){
 
 void updateStrip() {
 #ifdef MICRO_MODE
-  for (int i = 0 ; i < lineCount(); i++) {
+  for (int i = 0 ; i < actualLedCount(); i++) {
     if (i < strip.numPixels()) {
-      strip.setPixelColor(i, strip.Color(lines[i].R(), lines[i].G(), lines[i].B()));
+      strip.setPixelColor(actual_leds[i], strip.Color(lines[i].R(), lines[i].G(), lines[i].B()));
     }
   }
   strip.show();

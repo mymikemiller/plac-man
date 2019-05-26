@@ -21,12 +21,15 @@ SDL_Renderer *renderer;
 #define LED_PIN 11
 // How many NeoPixels are attached to the Arduino?
 #define LED_COUNT 50
+// The analog pins to control the rainbow center
+#define DIAL_PIN_X 1
+#define DIAL_PIN_Y 2
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 
 #include <math.h>
 
-const byte actual_leds[] PROGMEM = {
+const byte actual_leds[] = {
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36};
 
@@ -461,13 +464,16 @@ void randomizeColors()
 
 bool clockwiseRainbow = true;
 
-// hueOffset is from 0-360
+// centerX and centerY are 0-1. hueOffset is from 0-360
 void colorWheel(float centerX, float centerY, float hueOffset)
 {
+  // Normalize center. Line center is 3,3, far corner is 6,6.
+  centerX = centerX * 6;
+  centerY = centerY * 6;
   for (byte i = 0; i < lineCount(); i++)
   {
     // angle will be between 0 and 360
-    float angle = getAngle(3, 3, lines[i].centerX(), lines[i].centerY());
+    float angle = getAngle(centerX, centerY, lines[i].centerX(), lines[i].centerY());
     float hue = fmod(360 + angle - hueOffset, 360);
     lines[i].setHue(hue);
   }
@@ -587,9 +593,6 @@ void assignColors()
 int getDirection()
 {
 #ifdef MICRO_MODE
-  pinMode(4, INPUT_PULLUP);
-  pinMode(5, INPUT_PULLUP);
-  pinMode(6, INPUT_PULLUP);
   bool leftButton = digitalRead(4);
   bool rightButton = digitalRead(5);
   if (leftButton)
@@ -609,7 +612,7 @@ int getDirection()
 }
 
 int msPerColorWheelRotation = 5000;
-int startedVizualizationMs = 0;
+int startedVisualizationMs = 0;
 
 int getMilliCount()
 {
@@ -623,33 +626,43 @@ int getMilliCount()
 #endif
 }
 
-int getMilliSpan(int nTimeStart)
+float getPercentThroughVisualization()
 {
-  int nSpan = getMilliCount() - nTimeStart;
-  if (nSpan < 0)
-    nSpan += 0x100000 * 1000;
-  return nSpan;
+  int milliCount = getMilliCount();
+  int nSpan = milliCount - startedVisualizationMs;
+  if (nSpan > msPerColorWheelRotation)
+  {
+    startedVisualizationMs = milliCount;
+    nSpan = 0;
+  }
+
+  int ms = nSpan % msPerColorWheelRotation; // ms is between 0 and msPerColorWheelRotation
+  float percent = ms / (float)msPerColorWheelRotation;
+  return percent;
 }
 
 void tick()
 {
   if (isRainbowMode())
   {
-    int lapsed = 0;
-#ifdef LAPTOP_MODE
-    if (startedVizualizationMs == 0)
-    {
-      startedVizualizationMs = getMilliCount();
-    }
-#else
-    if (startedVizualizationMs == 0)
-    {
-      startedVizualizationMs = millis();
-    }
+    float centerX = 0.5;
+    float centerY = 0.5;
+#ifdef MICRO_MODE
+    centerX = analogRead(DIAL_PIN_X) / 1024.0;
+    centerY = analogRead(DIAL_PIN_Y) / 1024.0;
 #endif
-    lapsed = getMilliSpan(startedVizualizationMs);
-    float percentThroughColorWheel = (lapsed % msPerColorWheelRotation) / (float)msPerColorWheelRotation;
-    colorWheel(0, 0, percentThroughColorWheel * 360);
+
+    if (startedVisualizationMs == 0)
+    {
+      startedVisualizationMs = getMilliCount();
+    }
+
+    float percentThroughColorWheel = getPercentThroughVisualization();
+    // float percentThroughColorWheel = msThroughVizualization / (float)msPerColorWheelRotation;
+    // Serial.print("percentThroughColorWheel: ");
+    // Serial.println(percentThroughColorWheel);
+    // float percentThroughColorWheel = (lapsed % msPerColorWheelRotation) / (float)msPerColorWheelRotation;
+    colorWheel(centerX, centerY, percentThroughColorWheel * 360);
   }
   else // Snake mode
   {
@@ -689,6 +702,13 @@ void setup()
   strip.setBrightness(255); // Set BRIGHTNESS to about 1/5 (max = 255)
   Serial.println(analogRead(A4));
   randomSeed(analogRead(A4));
+
+  pinMode(4, INPUT_PULLUP);
+  pinMode(5, INPUT_PULLUP);
+  pinMode(6, INPUT_PULLUP);
+  // Initialize analog pins
+  pinMode(DIAL_PIN_X, INPUT_PULLUP);
+  pinMode(DIAL_PIN_Y, INPUT_PULLUP);
 #endif
 }
 

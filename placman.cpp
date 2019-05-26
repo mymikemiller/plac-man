@@ -24,6 +24,7 @@ SDL_Renderer *renderer;
 // The analog pins to control the rainbow center
 #define DIAL_PIN_X 1
 #define DIAL_PIN_Y 2
+#define DIAL_PIN_SPEED 0
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 
@@ -611,7 +612,6 @@ int getDirection()
   return direction;
 }
 
-int msPerColorWheelRotation = 5000;
 int startedVisualizationMs = 0;
 
 int getMilliCount()
@@ -626,19 +626,38 @@ int getMilliCount()
 #endif
 }
 
+int countdownToPollSpeed = 20; // Prevent polling every frame.
+int msPerVizualizationRotation = 5000;
 float getPercentThroughVisualization()
 {
   int milliCount = getMilliCount();
+  countdownToPollSpeed--;
+  if (countdownToPollSpeed < 0)
+  {
+    msPerVizualizationRotation = getMillisPerVisualizationRevolution();
+    countdownToPollSpeed = 20;
+  }
   int nSpan = milliCount - startedVisualizationMs;
-  if (nSpan > msPerColorWheelRotation)
+  if (nSpan > msPerVizualizationRotation)
   {
     startedVisualizationMs = milliCount;
     nSpan = 0;
   }
 
-  int ms = nSpan % msPerColorWheelRotation; // ms is between 0 and msPerColorWheelRotation
-  float percent = ms / (float)msPerColorWheelRotation;
+  int ms = nSpan % msPerVizualizationRotation; // ms is between 0 and msPerVizualizationRotation
+  float percent = ms / (float)msPerVizualizationRotation;
   return percent;
+}
+
+int getMillisPerVisualizationRevolution()
+{
+#ifdef LAPTOP_MODE
+  return 5000;
+#endif
+  float speedPercent = 1 - (analogRead(DIAL_PIN_SPEED) / 1024.0);
+  int slowestSpeed = 500;
+  int fastestSpeed = 10000;
+  return speedPercent * (fastestSpeed - slowestSpeed) + slowestSpeed;
 }
 
 void tick()
@@ -658,10 +677,6 @@ void tick()
     }
 
     float percentThroughColorWheel = getPercentThroughVisualization();
-    // float percentThroughColorWheel = msThroughVizualization / (float)msPerColorWheelRotation;
-    // Serial.print("percentThroughColorWheel: ");
-    // Serial.println(percentThroughColorWheel);
-    // float percentThroughColorWheel = (lapsed % msPerColorWheelRotation) / (float)msPerColorWheelRotation;
     colorWheel(centerX, centerY, percentThroughColorWheel * 360);
   }
   else // Snake mode
@@ -709,6 +724,7 @@ void setup()
   // Initialize analog pins
   pinMode(DIAL_PIN_X, INPUT_PULLUP);
   pinMode(DIAL_PIN_Y, INPUT_PULLUP);
+  pinMode(DIAL_PIN_SPEED, INPUT_PULLUP);
 #endif
 }
 
